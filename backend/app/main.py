@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 import sqlite3
@@ -9,6 +10,7 @@ from fastapi.responses import FileResponse
 from app.database import get_database, initialize_database
 from app.models import CollectionItemCreate, CollectionItemUpdate, PriceSnapshotCreate, WatchlistCreate
 from app import repository
+from app.jobs import refresh_set_prices
 
 
 @asynccontextmanager
@@ -33,9 +35,20 @@ def serialize(row: sqlite3.Row) -> dict:
     return item
 
 
+async def refresh_item_price(database, item: sqlite3.Row) -> dict:
+    result = serialize(item)
+    try:
+        await refresh_set_prices(database, item["set_id"], item["set_number"], item["currency"])
+        refreshed = repository.get_collection_item(database, item["id"])
+        return serialize(refreshed)
+    except Exception as error:
+        result["price_refresh_error"] = str(error)
+        return result
+
+
 @app.post("/collection", status_code=status.HTTP_201_CREATED)
 def add_collection_item(payload: CollectionItemCreate, database=Depends(get_database)) -> dict:
-    return serialize(repository.create_collection_item(database, payload))
+    return asyncio.run(refresh_item_price(database, repository.create_collection_item(database, payload)))
 
 
 @app.get("/collection")
@@ -48,7 +61,7 @@ def update_collection_item(item_id: int, payload: CollectionItemUpdate, database
     item = repository.update_collection_item(database, item_id, payload)
     if item is None:
         raise HTTPException(404, "Collection item not found")
-    return serialize(item)
+    return asyncio.run(refresh_item_price(database, item))
 
 
 @app.delete("/collection/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
