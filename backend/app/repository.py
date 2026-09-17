@@ -22,11 +22,20 @@ def create_collection_item(database: sqlite3.Connection, payload: CollectionItem
         msrp_cents=COALESCE(excluded.msrp_cents, lego_sets.msrp_cents), updated_at=CURRENT_TIMESTAMP""",
         (lego_set.set_number, name, lego_set.theme, lego_set.msrp_cents, lego_set.currency.upper()))
     set_id = database.execute("SELECT id FROM lego_sets WHERE set_number = ?", (lego_set.set_number,)).fetchone()[0]
-    cursor = database.execute("""INSERT INTO collection_items (lego_set_id, quantity, condition, purchase_price_cents, purchased_at, notes)
-        VALUES (?, ?, ?, ?, ?, ?)""", (set_id, payload.quantity, payload.condition.value, payload.purchase_price_cents,
-        payload.purchased_at.isoformat() if payload.purchased_at else None, payload.notes))
+    purchased_at = payload.purchased_at.isoformat() if payload.purchased_at else None
+    existing = database.execute("""SELECT id FROM collection_items WHERE lego_set_id = ? AND condition = ?
+        AND purchase_price_cents = ? AND COALESCE(purchased_at, '') = COALESCE(?, '') AND COALESCE(notes, '') = COALESCE(?, '')""",
+        (set_id, payload.condition.value, payload.purchase_price_cents, purchased_at, payload.notes)).fetchone()
+    if existing:
+        database.execute("UPDATE collection_items SET quantity = quantity + ?, updated_at=CURRENT_TIMESTAMP WHERE id = ?", (payload.quantity, existing["id"]))
+        item_id = existing["id"]
+    else:
+        cursor = database.execute("""INSERT INTO collection_items (lego_set_id, quantity, condition, purchase_price_cents, purchased_at, notes)
+            VALUES (?, ?, ?, ?, ?, ?)""", (set_id, payload.quantity, payload.condition.value, payload.purchase_price_cents,
+            purchased_at, payload.notes))
+        item_id = cursor.lastrowid
     database.commit()
-    return get_collection_item(database, cursor.lastrowid)
+    return get_collection_item(database, item_id)
 
 
 def get_collection_item(database: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:
