@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from app.database import get_database, initialize_database
 from app.models import CollectionItemCreate, CollectionItemUpdate, PriceSnapshotCreate, WatchlistCreate
 from app import repository
-from app.jobs import refresh_set_prices
+from app.jobs import refresh_set_prices, refresh_stale_prices
 
 
 @asynccontextmanager
@@ -84,6 +84,7 @@ def get_price_history(set_id: int, database=Depends(get_database)) -> list[dict]
 
 @app.get("/dashboard")
 def dashboard(database=Depends(get_database)) -> dict:
+    asyncio.run(refresh_stale_prices(database))
     items = [serialize(item) for item in repository.list_collection_items(database)]
     themes: dict[str, dict[str, int]] = {}
     for item in items:

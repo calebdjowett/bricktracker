@@ -38,6 +38,9 @@ class BrickLinkPriceProvider(PriceProvider):
         return await asyncio.to_thread(self._prices_for_set, set_number, currency)
 
     def _prices_for_set(self, set_number: str, currency: str) -> list[MarketPrice]:
+        required_settings = ("BRICKLINK_CONSUMER_KEY", "BRICKLINK_CONSUMER_SECRET", "BRICKLINK_TOKEN", "BRICKLINK_TOKEN_SECRET")
+        if missing_settings := [setting for setting in required_settings if not os.environ.get(setting)]:
+            raise RuntimeError(f"BrickLink pricing is not configured. Add {', '.join(missing_settings)} to backend/.env.")
         client = OAuth1Session(os.environ["BRICKLINK_CONSUMER_KEY"], client_secret=os.environ["BRICKLINK_CONSUMER_SECRET"], resource_owner_key=os.environ["BRICKLINK_TOKEN"], resource_owner_secret=os.environ["BRICKLINK_TOKEN_SECRET"], signature_type="auth_header")
         results = []
         for bricklink_condition, condition in (("N", PriceCondition.new), ("U", PriceCondition.used)):
