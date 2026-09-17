@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 
 class BrickTrackerApi {
-  BrickTrackerApi({http.Client? client, this.baseUrl = 'http://10.0.2.2:8000'}) : _client = client ?? http.Client();
+  BrickTrackerApi({http.Client? client, this.baseUrl = 'http://10.0.2.2:8001'}) : _client = client ?? http.Client();
   final http.Client _client;
   final String baseUrl;
 
