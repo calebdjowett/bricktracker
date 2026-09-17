@@ -71,7 +71,24 @@ def get_price_history(set_id: int, database=Depends(get_database)) -> list[dict]
 @app.get("/dashboard")
 def dashboard(database=Depends(get_database)) -> dict:
     items = [serialize(item) for item in repository.list_collection_items(database)]
-    return {"collection_value_cents": sum(item["current_value_cents"] for item in items), "profit_loss_cents": sum(item["gain_loss_cents"] for item in items), "best_performing_sets": sorted(items, key=lambda item: item["gain_loss_cents"], reverse=True)[:5]}
+    themes: dict[str, dict[str, int]] = {}
+    for item in items:
+        theme = themes.setdefault(item["theme"], {"value_cents": 0, "gain_loss_cents": 0})
+        theme["value_cents"] += item["current_value_cents"]
+        theme["gain_loss_cents"] += item["gain_loss_cents"]
+    retirement_rows = database.execute("SELECT estimated_retirement_date FROM retirement_statuses WHERE status = 'retiring_soon'").fetchall()
+    windows = {"thirty_days": 0, "ninety_days": 0, "six_months": 0}
+    for row in retirement_rows:
+        if not row["estimated_retirement_date"]:
+            continue
+        days = (date.fromisoformat(row["estimated_retirement_date"]) - date.today()).days
+        if days <= 30:
+            windows["thirty_days"] += 1
+        if days <= 90:
+            windows["ninety_days"] += 1
+        if days <= 183:
+            windows["six_months"] += 1
+    return {"collection_value_cents": sum(item["current_value_cents"] for item in items), "profit_loss_cents": sum(item["gain_loss_cents"] for item in items), "best_performing_sets": sorted(items, key=lambda item: item["gain_loss_cents"], reverse=True)[:5], "most_appreciated_themes": [{"theme": theme, **values} for theme, values in sorted(themes.items(), key=lambda entry: entry[1]["gain_loss_cents"], reverse=True)], "retirement_opportunities": windows}
 
 
 @app.get("/retiring-soon")
@@ -83,7 +100,17 @@ def retiring_soon(database=Depends(get_database)) -> dict:
         item = dict(row)
         item["months_remaining"] = max(0, round((date.fromisoformat(item["estimated_retirement_date"]) - date.today()).days / 30.44, 1)) if item["estimated_retirement_date"] else None
         groups.setdefault(item["theme"] if item["theme"] in themes else "Other themes", []).append(item)
-    return {"groups": groups}
+    windows = {"thirty_days": 0, "ninety_days": 0, "six_months": 0}
+    for entries in groups.values():
+        for item in entries:
+            months = item["months_remaining"]
+            if months is not None and months <= 1:
+                windows["thirty_days"] += 1
+            if months is not None and months <= 3:
+                windows["ninety_days"] += 1
+            if months is not None and months <= 6:
+                windows["six_months"] += 1
+    return {"groups": groups, "windows": windows}
 
 
 @app.post("/watchlist", status_code=status.HTTP_201_CREATED)
