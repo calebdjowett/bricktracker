@@ -5,6 +5,13 @@ from pathlib import Path
 DATABASE_PATH = Path(__file__).parents[2] / "data" / "bricktracker.sqlite3"
 
 
+def connection() -> sqlite3.Connection:
+    database = sqlite3.connect(DATABASE_PATH)
+    database.row_factory = sqlite3.Row
+    database.execute("PRAGMA foreign_keys = ON")
+    return database
+
+
 def initialize_database() -> None:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     schema_path = Path(__file__).parents[2] / "database" / "schema.sql"
@@ -13,9 +20,7 @@ def initialize_database() -> None:
 
 
 def get_database() -> Generator[sqlite3.Connection, None, None]:
-    database = sqlite3.connect(DATABASE_PATH)
-    database.row_factory = sqlite3.Row
-    database.execute("PRAGMA foreign_keys = ON")
+    database = connection()
     try:
         yield database
     finally:
