@@ -16,7 +16,7 @@ class PriceCondition(str, Enum):
 
 class SetCreate(BaseModel):
     set_number: str = Field(pattern=r"^\d{3,8}-\d$")
-    name: str
+    name: str | None = None
     theme: str = "Other"
     msrp_cents: int | None = Field(default=None, ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)

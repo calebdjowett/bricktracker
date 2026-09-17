@@ -16,10 +16,11 @@ def _collection_query(suffix: str) -> str:
 
 def create_collection_item(database: sqlite3.Connection, payload: CollectionItemCreate) -> sqlite3.Row:
     lego_set = payload.set
+    name = lego_set.name or f"Set {lego_set.set_number}"
     database.execute("""INSERT INTO lego_sets (set_number, name, theme, msrp_cents, currency)
         VALUES (?, ?, ?, ?, ?) ON CONFLICT(set_number) DO UPDATE SET name=excluded.name, theme=excluded.theme,
         msrp_cents=COALESCE(excluded.msrp_cents, lego_sets.msrp_cents), updated_at=CURRENT_TIMESTAMP""",
-        (lego_set.set_number, lego_set.name, lego_set.theme, lego_set.msrp_cents, lego_set.currency.upper()))
+        (lego_set.set_number, name, lego_set.theme, lego_set.msrp_cents, lego_set.currency.upper()))
     set_id = database.execute("SELECT id FROM lego_sets WHERE set_number = ?", (lego_set.set_number,)).fetchone()[0]
     cursor = database.execute("""INSERT INTO collection_items (lego_set_id, quantity, condition, purchase_price_cents, purchased_at, notes)
         VALUES (?, ?, ?, ?, ?, ?)""", (set_id, payload.quantity, payload.condition.value, payload.purchase_price_cents,

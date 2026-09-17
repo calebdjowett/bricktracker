@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi.responses import FileResponse
 
 from app.database import get_database, initialize_database
 from app.models import CollectionItemCreate, CollectionItemUpdate, PriceSnapshotCreate, WatchlistCreate
@@ -118,3 +119,8 @@ def watch_set(payload: WatchlistCreate, database=Depends(get_database)) -> dict:
     database.execute("INSERT OR REPLACE INTO watchlist_items (lego_set_id, notifications_enabled) VALUES (?, ?)", (payload.set_id, payload.notifications_enabled))
     database.commit()
     return {"status": "watching", "set_id": payload.set_id}
+
+
+@app.get("/", include_in_schema=False)
+def web_app() -> FileResponse:
+    return FileResponse("app/static/index.html")
