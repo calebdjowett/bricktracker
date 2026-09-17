@@ -19,7 +19,7 @@ class SetCreate(BaseModel):
     name: str | None = None
     theme: str = "Other"
     msrp_cents: int | None = Field(default=None, ge=0)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="CAD", min_length=3, max_length=3, pattern=r"^(CAD|USD)$")
 
 
 class CollectionItemCreate(BaseModel):
