@@ -11,7 +11,8 @@ async def refresh_prices() -> None:
     initialize_database()
     with connection() as database:
         provider = BrickLinkPriceProvider()
-        for lego_set in database.execute("SELECT id, set_number, currency FROM lego_sets").fetchall():
+        for lego_set in database.execute("""SELECT DISTINCT ls.id, ls.set_number, ls.currency
+            FROM lego_sets ls JOIN collection_items ci ON ci.lego_set_id = ls.id""").fetchall():
             for price in await provider.prices_for_set(lego_set["set_number"], lego_set["currency"]):
                 add_price_snapshot(database, lego_set["id"], PriceSnapshotCreate(condition=price.condition, average_price_cents=price.average_price_cents, currency=price.currency, observed_at=price.observed_at, provider="bricklink"))
 
