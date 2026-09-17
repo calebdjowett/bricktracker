@@ -3,10 +3,14 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from requests_oauthlib import OAuth1Session
 
 from app.models import PriceCondition
+
+load_dotenv(Path(__file__).parents[1] / ".env")
 
 
 @dataclass(frozen=True)
