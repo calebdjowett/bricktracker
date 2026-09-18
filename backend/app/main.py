@@ -1,12 +1,13 @@
 import asyncio
 from contextlib import asynccontextmanager
-
-import sqlite3
+from collections.abc import Mapping
 from datetime import date
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials
 
+from app.auth import AuthenticatedUser, current_user, public_auth_config, security
 from app.database import get_database, initialize_database
 from app.models import CollectionItemCreate, CollectionItemUpdate, PriceSnapshotCreate, WatchlistCreate
 from app import repository
@@ -27,7 +28,16 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-def serialize(row: sqlite3.Row) -> dict:
+def authenticated_user(credentials: HTTPAuthorizationCredentials | None = Depends(security)) -> AuthenticatedUser:
+    return current_user(credentials)
+
+
+@app.get("/auth/config")
+def auth_config() -> dict[str, str]:
+    return public_auth_config()
+
+
+def serialize(row: Mapping) -> dict:
     item = dict(row)
     paid = item.get("purchase_price_cents", 0) * item.get("quantity", 0)
     item["gain_loss_cents"] = item.get("current_value_cents", 0) - paid
@@ -35,11 +45,11 @@ def serialize(row: sqlite3.Row) -> dict:
     return item
 
 
-async def refresh_item_price(database, item: sqlite3.Row) -> dict:
+async def refresh_item_price(database, owner_id: str, item: Mapping) -> dict:
     result = serialize(item)
     try:
         await refresh_set_prices(database, item["set_id"], item["set_number"], item["currency"])
-        refreshed = repository.get_collection_item(database, item["id"])
+        refreshed = repository.get_collection_item(database, owner_id, item["id"])
         return serialize(refreshed)
     except Exception as error:
         result["price_refresh_error"] = str(error)
@@ -47,45 +57,47 @@ async def refresh_item_price(database, item: sqlite3.Row) -> dict:
 
 
 @app.post("/collection", status_code=status.HTTP_201_CREATED)
-def add_collection_item(payload: CollectionItemCreate, database=Depends(get_database)) -> dict:
-    return asyncio.run(refresh_item_price(database, repository.create_collection_item(database, payload)))
+def add_collection_item(payload: CollectionItemCreate, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
+    return asyncio.run(refresh_item_price(database, user.id, repository.create_collection_item(database, user.id, payload)))
 
 
 @app.get("/collection")
-def collection(database=Depends(get_database)) -> list[dict]:
-    return [serialize(item) for item in repository.list_collection_items(database)]
+def collection(user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> list[dict]:
+    return [serialize(item) for item in repository.list_collection_items(database, user.id)]
 
 
 @app.patch("/collection/{item_id}")
-def update_collection_item(item_id: int, payload: CollectionItemUpdate, database=Depends(get_database)) -> dict:
-    item = repository.update_collection_item(database, item_id, payload)
+def update_collection_item(item_id: int, payload: CollectionItemUpdate, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
+    item = repository.update_collection_item(database, user.id, item_id, payload)
     if item is None:
         raise HTTPException(404, "Collection item not found")
-    return asyncio.run(refresh_item_price(database, item))
+    return asyncio.run(refresh_item_price(database, user.id, item))
 
 
 @app.delete("/collection/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_collection_item(item_id: int, database=Depends(get_database)) -> Response:
-    if not repository.delete_collection_item(database, item_id):
+def delete_collection_item(item_id: int, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> Response:
+    if not repository.delete_collection_item(database, user.id, item_id):
         raise HTTPException(404, "Collection item not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/sets/{set_id}/prices", status_code=status.HTTP_201_CREATED)
-def store_price(set_id: int, payload: PriceSnapshotCreate, database=Depends(get_database)) -> dict:
+def store_price(set_id: int, payload: PriceSnapshotCreate, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
+    if not repository.user_owns_set(database, user.id, set_id):
+        raise HTTPException(404, "Set not found in your collection")
     repository.add_price_snapshot(database, set_id, payload)
     return {"status": "stored"}
 
 
 @app.get("/sets/{set_id}/price-history")
-def get_price_history(set_id: int, database=Depends(get_database)) -> list[dict]:
-    return [dict(row) for row in repository.price_history(database, set_id)]
+def get_price_history(set_id: int, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> list[dict]:
+    return [dict(row) for row in repository.price_history(database, user.id, set_id)]
 
 
 @app.get("/dashboard")
-def dashboard(database=Depends(get_database)) -> dict:
+def dashboard(user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
     asyncio.run(refresh_stale_prices(database))
-    items = [serialize(item) for item in repository.list_collection_items(database)]
+    items = [serialize(item) for item in repository.list_collection_items(database, user.id)]
     themes: dict[str, dict[str, int]] = {}
     for item in items:
         theme = themes.setdefault(item["theme"], {"value_cents": 0, "gain_loss_cents": 0})
@@ -107,7 +119,7 @@ def dashboard(database=Depends(get_database)) -> dict:
 
 
 @app.get("/retiring-soon")
-def retiring_soon(database=Depends(get_database)) -> dict:
+def retiring_soon(_: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
     rows = database.execute("SELECT ls.*, rs.status, rs.estimated_retirement_date FROM retirement_statuses rs JOIN lego_sets ls ON ls.id = rs.lego_set_id WHERE rs.status = 'retiring_soon' ORDER BY rs.estimated_retirement_date").fetchall()
     groups: dict[str, list[dict]] = {}
     themes = {"Star Wars", "Icons", "Technic", "Botanicals", "Harry Potter", "Marvel", "Architecture", "Ninjago", "Creator Expert", "City"}
@@ -129,9 +141,9 @@ def retiring_soon(database=Depends(get_database)) -> dict:
 
 
 @app.post("/watchlist", status_code=status.HTTP_201_CREATED)
-def watch_set(payload: WatchlistCreate, database=Depends(get_database)) -> dict:
-    database.execute("INSERT OR REPLACE INTO watchlist_items (lego_set_id, notifications_enabled) VALUES (?, ?)", (payload.set_id, payload.notifications_enabled))
-    database.commit()
+def watch_set(payload: WatchlistCreate, user: AuthenticatedUser = Depends(authenticated_user), database=Depends(get_database)) -> dict:
+    database.execute("""INSERT INTO watchlist_items (owner_id, lego_set_id, notifications_enabled) VALUES (%s, %s, %s)
+        ON CONFLICT (owner_id, lego_set_id) DO UPDATE SET notifications_enabled = EXCLUDED.notifications_enabled""", (user.id, payload.set_id, payload.notifications_enabled))
     return {"status": "watching", "set_id": payload.set_id}
 
 

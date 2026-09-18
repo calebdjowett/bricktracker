@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: bricktracker
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: DEFAULT_CURRENCY
+        value: CAD
+      - key: BRICKLINK_CONSUMER_KEY
+        sync: false
+      - key: BRICKLINK_CONSUMER_SECRET
+        sync: false
+      - key: BRICKLINK_TOKEN
+        sync: false
+      - key: BRICKLINK_TOKEN_SECRET
+        sync: false

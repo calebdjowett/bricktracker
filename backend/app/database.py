@@ -1,27 +1,32 @@
-import sqlite3
 from collections.abc import Generator
+import os
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parents[2] / "data" / "bricktracker.sqlite3"
+from psycopg import Connection, connect
+from psycopg.rows import dict_row
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
-def connection() -> sqlite3.Connection:
-    database = sqlite3.connect(DATABASE_PATH)
-    database.row_factory = sqlite3.Row
-    database.execute("PRAGMA foreign_keys = ON")
-    return database
+def connection() -> Connection:
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be configured with the Supabase Postgres connection string.")
+    return connect(DATABASE_URL, row_factory=dict_row)
 
 
 def initialize_database() -> None:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     schema_path = Path(__file__).parents[2] / "database" / "schema.sql"
-    with sqlite3.connect(DATABASE_PATH) as database:
-        database.executescript(schema_path.read_text())
+    with connection() as database:
+        database.execute(schema_path.read_text())
 
 
-def get_database() -> Generator[sqlite3.Connection, None, None]:
+def get_database() -> Generator[Connection, None, None]:
     database = connection()
     try:
         yield database
+        database.commit()
+    except Exception:
+        database.rollback()
+        raise
     finally:
         database.close()

@@ -26,7 +26,7 @@ async def refresh_stale_prices(database) -> None:
         FROM lego_sets ls JOIN collection_items ci ON ci.lego_set_id = ls.id
         WHERE NOT EXISTS (
             SELECT 1 FROM price_snapshots ps
-            WHERE ps.lego_set_id = ls.id AND DATE(ps.observed_at) = ?
+            WHERE ps.lego_set_id = ls.id AND DATE(ps.observed_at) = %s
         )""", (date.today().isoformat(),)).fetchall():
         try:
             await refresh_set_prices(database, lego_set["id"], lego_set["set_number"], lego_set["currency"])
